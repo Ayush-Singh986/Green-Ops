@@ -170,6 +170,154 @@ flowchart LR
   * `cost_anomaly_detector_agent` → alert on sudden usage spikes
 
 ---
+
+## Deployment
+
+GreenOps consists of a Streamlit frontend, a Google ADK agent service, BigQuery resources, and a daily snapshot/model-training Cloud Function.
+
+### 1. Prerequisites
+
+- A Google Cloud project with billing enabled
+- `gcloud` CLI installed and authenticated
+- Docker installed for local builds
+- Required APIs enabled:
+  - Vertex AI
+  - BigQuery
+  - Compute Engine
+  - Cloud Run
+  - Cloud Scheduler
+  - Secret Manager
+  - Google Docs and Google Drive APIs
+
+```bash
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+gcloud services enable \
+  aiplatform.googleapis.com \
+  bigquery.googleapis.com \
+  compute.googleapis.com \
+  run.googleapis.com \
+  cloudscheduler.googleapis.com \
+  secretmanager.googleapis.com \
+  docs.googleapis.com \
+  drive.googleapis.com
+```
+
+### 2. Configure secrets
+
+Create the Climatiq API key and service-account credentials in Secret Manager:
+
+```bash
+echo -n "YOUR_CLIMATIQ_API_KEY" | \
+  gcloud secrets create CLIMATIQ_API_KEY --data-file=- \
+  --replication-policy="automatic"
+
+gcloud secrets create SERVICE_ACCOUNT_KEY --data-file=- \
+  --replication-policy="automatic"
+```
+
+Upload the complete JSON service-account key with:
+
+```bash
+gcloud secrets versions add SERVICE_ACCOUNT_KEY --data-file=service-account.json
+```
+
+Grant the deployed service account access to Secret Manager, BigQuery, Compute Engine, Google Docs, and Google Drive according to the resources it must manage.
+
+### 3. Prepare BigQuery
+
+Create the `gcp_server_details` dataset and tables in BigQuery:
+
+- `server_metrics`
+- `server_metrics_timeseries`
+
+The snapshot function in `Cloud Scheduler/Daily_Data_Snapshot_Model_Training/daily_data_snapshot.py` appends metric samples and creates or replaces:
+
+- `server_cpu_forecast_model`
+- `server_mem_forecast_model`
+- `server_carbon_forecast_model`
+
+Deploy the function:
+
+```bash
+cd "Cloud Scheduler/Daily_Data_Snapshot_Model_Training"
+
+gcloud functions deploy greenops-daily-snapshot \
+  --gen2 \
+  --runtime=python312 \
+  --region=us-central1 \
+  --source=. \
+  --entry-point=run_daily_snapshot_model_retrain \
+  --trigger-http \
+  --no-allow-unauthenticated
+```
+
+Create a Cloud Scheduler job to call the function on a daily schedule:
+
+```bash
+gcloud scheduler jobs create http greenops-daily-snapshot \
+  --location=us-central1 \
+  --schedule="0 2 * * *" \
+  --uri="YOUR_FUNCTION_URL" \
+  --oidc-service-account-email="YOUR_SERVICE_ACCOUNT"
+```
+
+### 4. Deploy the ADK agent service
+
+The agent service is in `greenops_agent/`. Build and deploy it as a Cloud Run container after adding the appropriate container entrypoint for the Google ADK API server.
+
+For example, from a container that serves the package over the ADK API:
+
+```bash
+gcloud run deploy greenops-agent-service \
+  --source=greenops_agent \
+  --region=us-central1 \
+  --allow-unauthenticated
+```
+
+The deployed service URL must expose:
+
+- `POST /apps/{app_name}/users/{user_id}/sessions/{session_id}`
+- `POST /run`
+
+Update `API_BASE_URL` in `Frontend/app.py` with the deployed agent service URL.
+
+### 5. Deploy the Streamlit frontend
+
+Build and deploy the existing frontend container:
+
+```bash
+cd Frontend
+
+gcloud run deploy greenops-ui \
+  --source=. \
+  --region=us-central1 \
+  --allow-unauthenticated \
+  --port=8080
+```
+
+### 6. Verify deployment
+
+1. Open the Cloud Run URL returned for `greenops-ui`.
+2. Select **Create session**.
+3. Submit a forecast or infrastructure recommendation request.
+4. Confirm that the agent service can access BigQuery and Secret Manager.
+5. Test the weekly report flow and presentation generation.
+
+### 7. Run locally
+
+Install frontend dependencies and start the UI:
+
+```bash
+cd Frontend
+python -m pip install -r requirements.txt
+python -m streamlit run app.py --server.port=8501
+```
+
+Open `http://127.0.0.1:8501`.
+
+Keep VM execution disabled or restricted until the deployed agent service has a service account with only the minimum Compute Engine permissions and the UI has explicit execution approval.
+
 ## IN ACTION: [LIVE HERE](https://greenops-ui-273345197968.us-central1.run.app/)
 
 
