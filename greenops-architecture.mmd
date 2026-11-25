@@ -1,0 +1,31 @@
+flowchart LR
+    U[User] --> FE[Streamlit Frontend]
+    FE -->|Session and run APIs| ADK[Google ADK Agent Service]
+    ADK --> ROOT[GreenOps Root Agent<br/>Gemini 2.0 Flash]
+
+    ROOT --> OPT[Optimization Advisor]
+    ROOT --> FORE[Forecasting Agent]
+    ROOT --> IMP[Impact Calculator]
+    ROOT --> EXEC[Safe Executor]
+    ROOT --> SUM[Weekly Summary Agent]
+
+    OPT --> SCOUT[Infra Scout]
+    SCOUT --> BQ[(BigQuery Metrics)]
+    OPT --> PROF[Workload Profiler]
+    PROF --> PRICE[Sparecores Pricing]
+    PROF --> CLIM[Climatiq Carbon API]
+    PROF --> REC[Recommender]
+
+    FORE --> BQML[(BigQuery ML<br/>ARIMA_PLUS)]
+    EXEC --> BQML
+    EXEC --> GCE[Compute Engine]
+
+    SUM --> CHARTS[Chart Generator]
+    CHARTS --> DRIVE[Google Drive]
+    SUM --> DOCS[Google Docs]
+    SUM --> PPT[Presentation Agent]
+    PPT --> DRIVE
+
+    SCHED[Cloud Scheduler] --> SNAPSHOT[Snapshot and Retraining Function]
+    SNAPSHOT --> BQ
+    SNAPSHOT --> BQML
